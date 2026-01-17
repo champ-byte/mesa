@@ -877,7 +877,7 @@ def test_get_neighborhood_mask():
 
 
 def test_select_cells():
-    """Test select_cells."""
+    """Test select_cells_boolean and select_cells_index."""
     dimensions = (5, 5)
     grid = OrthogonalMooreGrid(dimensions, torus=False, random=random.Random(42))
 
@@ -892,8 +892,9 @@ def test_select_cells():
     target_idx = tuple(target_indices[0])
     grid._cells[target_idx].add_agent(agent)
 
-    mask = grid.select_cells(
-        conditions={"elevation": lambda x: x > 0.5}, return_list=False, only_empty=True
+    # Test select_cells_boolean with only_empty=True
+    mask = grid.select_cells_boolean(
+        conditions={"elevation": lambda x: x > 0.5}, only_empty=True
     )
     assert mask.shape == (5, 5)
 
@@ -902,42 +903,74 @@ def test_select_cells():
 
     assert np.all(mask == expected_mask)
 
-    mask = grid.select_cells(
-        conditions={"elevation": lambda x: x > 0.5}, return_list=False, only_empty=False
+    # Test select_cells_boolean with only_empty=False
+    mask = grid.select_cells_boolean(
+        conditions={"elevation": lambda x: x > 0.5}, only_empty=False
     )
     assert mask.shape == (5, 5)
     assert np.all(mask == (data > 0.5))
 
-    mask = grid.select_cells(
-        extreme_values={"elevation": "highest"}, return_list=False, only_empty=False
+    # Test extreme_values (highest)
+    mask = grid.select_cells_boolean(
+        extreme_values={"elevation": "highest"}, only_empty=False
     )
     assert mask.shape == (5, 5)
     assert np.all(mask == (data == data.max()))
 
-    mask = grid.select_cells(
-        extreme_values={"elevation": "lowest"}, return_list=False, only_empty=False
+    # Test extreme_values (lowest)
+    mask = grid.select_cells_boolean(
+        extreme_values={"elevation": "lowest"}, only_empty=False
     )
     assert mask.shape == (5, 5)
     assert np.all(mask == (data == data.min()))
 
+    # Test Error handling
     with pytest.raises(ValueError):
-        grid.select_cells(
-            extreme_values={"elevation": "weird"}, return_list=False, only_empty=False
+        grid.select_cells_boolean(
+            extreme_values={"elevation": "weird"}, only_empty=False
         )
 
-    # Test pre-specified mask
-    # Create a mask that selects only the first 3 rows
+    # Test Pre-specified mask
     row_mask = np.zeros((5, 5), dtype=bool)
     row_mask[:3, :] = True
 
-    mask = grid.select_cells(
-        conditions={"elevation": lambda x: x > 0.5},
-        masks=row_mask,
-        return_list=False,
-        only_empty=False,
+    mask = grid.select_cells_boolean(
+        conditions={"elevation": lambda x: x > 0.5}, masks=row_mask, only_empty=False
     )
     assert mask.shape == (5, 5)
     assert np.all(mask == ((data > 0.5) & row_mask))
+
+    # Test select_cells_index (return list of coordinates)
+    cells = grid.select_cells_index(
+        conditions={"elevation": lambda x: x > 0.5}, only_empty=False
+    )
+    assert isinstance(cells, list)
+    # Verify the coordinates match the mask from Test 2
+    expected_indices = list(zip(*np.where(data > 0.5)))
+    # Sort both to ensure order doesn't affect equality
+    assert sorted(cells) == sorted(expected_indices)
+
+
+def test_select_cells_deprecation():
+    """Test that the deprecated select_cells method warns and delegates correctly."""
+    dimensions = (5, 5)
+    grid = OrthogonalMooreGrid(dimensions, torus=False, random=random.Random(42))
+    data = np.zeros((5, 5))
+    grid.add_property_layer(PropertyLayer.from_data("elevation", data))
+
+    # Test warning for return_list=False (delegates to _boolean)
+    with pytest.warns(FutureWarning, match="select_cells is deprecated"):
+        mask = grid.select_cells(
+            conditions={"elevation": lambda x: True}, return_list=False
+        )
+        assert isinstance(mask, np.ndarray)
+
+    # Test warning for return_list=True (delegates to _index)
+    with pytest.warns(FutureWarning, match="select_cells is deprecated"):
+        cells = grid.select_cells(
+            conditions={"elevation": lambda x: True}, return_list=True
+        )
+        assert isinstance(cells, list)
 
 
 def test_property_layer():
