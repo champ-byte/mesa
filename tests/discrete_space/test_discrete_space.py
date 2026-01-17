@@ -884,12 +884,23 @@ def test_select_cells():
     data = np.random.default_rng(12456).random((5, 5))
     grid.add_property_layer(PropertyLayer.from_data("elevation", data))
 
-    # fixme, add an agent and update the np.all test accordingly
+    # agent to test only_empty=True
+    model = Model()
+    agent = CellAgent(model)
+    # Find a cell that meets the condition > 0.5
+    target_indices = np.argwhere(data > 0.5)
+    target_idx = tuple(target_indices[0])
+    grid._cells[target_idx].add_agent(agent)
+
     mask = grid.select_cells(
         conditions={"elevation": lambda x: x > 0.5}, return_list=False, only_empty=True
     )
     assert mask.shape == (5, 5)
-    assert np.all(mask == (data > 0.5))
+
+    expected_mask = data > 0.5
+    expected_mask[target_idx] = False
+
+    assert np.all(mask == expected_mask)
 
     mask = grid.select_cells(
         conditions={"elevation": lambda x: x > 0.5}, return_list=False, only_empty=False
@@ -897,7 +908,6 @@ def test_select_cells():
     assert mask.shape == (5, 5)
     assert np.all(mask == (data > 0.5))
 
-    # fixme add extreme_values highest and lowest
     mask = grid.select_cells(
         extreme_values={"elevation": "highest"}, return_list=False, only_empty=False
     )
@@ -915,7 +925,19 @@ def test_select_cells():
             extreme_values={"elevation": "weird"}, return_list=False, only_empty=False
         )
 
-    # fixme add pre-specified mask to any other option
+    # Test pre-specified mask
+    # Create a mask that selects only the first 3 rows
+    row_mask = np.zeros((5, 5), dtype=bool)
+    row_mask[:3, :] = True
+
+    mask = grid.select_cells(
+        conditions={"elevation": lambda x: x > 0.5},
+        masks=row_mask,
+        return_list=False,
+        only_empty=False,
+    )
+    assert mask.shape == (5, 5)
+    assert np.all(mask == ((data > 0.5) & row_mask))
 
 
 def test_property_layer():
@@ -1268,3 +1290,69 @@ def test_radius_exceeds_reachable_cells():
 
     # Should return all reachable cells (99, since we exclude center by default)
     assert len(neighbors) == 99
+
+
+def test_property_layer_select_cells_split():
+    """Test the split select_cells methods in PropertyLayer."""
+    dimensions = (5, 5)
+    data = np.random.default_rng(42).random(dimensions)
+    layer = PropertyLayer.from_data("test_layer", data)
+
+    def condition(x):
+        return x > 0.5
+
+    # Test select_cells_boolean
+    mask = layer.select_cells_boolean(condition)
+    assert mask.shape == dimensions
+    assert mask.dtype == bool
+    assert np.all(mask == (data > 0.5))
+
+    # Test select_cells_index
+    indices = layer.select_cells_index(condition)
+    assert isinstance(indices, list)
+    expected_indices = list(zip(*np.where(data > 0.5)))
+    assert indices == expected_indices
+
+    # Test deprecated select_cells
+    with pytest.warns(FutureWarning, match="select_cells is deprecated"):
+        res_list = layer.select_cells(condition, return_list=True)
+    assert res_list == indices
+
+    with pytest.warns(FutureWarning, match="select_cells is deprecated"):
+        res_mask = layer.select_cells(condition, return_list=False)
+    assert np.all(res_mask == mask)
+
+
+def test_grid_select_cells_split():
+    """Test the split select_cells methods in HasPropertyLayers."""
+    dimensions = (5, 5)
+    grid = OrthogonalMooreGrid(dimensions, torus=False, random=random.Random(42))
+
+    data = np.random.default_rng(12456).random(dimensions)
+    grid.add_property_layer(PropertyLayer.from_data("elevation", data))
+
+    # Test select_cells_boolean
+    mask = grid.select_cells_boolean(conditions={"elevation": lambda x: x > 0.5})
+    assert mask.shape == dimensions
+    assert mask.dtype == bool
+    assert np.all(mask == (data > 0.5))
+
+    # Test select_cells_index
+    indices = grid.select_cells_index(conditions={"elevation": lambda x: x > 0.5})
+    assert isinstance(indices, list)
+    expected_indices = list(zip(*np.where(data > 0.5)))
+    assert len(indices) == len(expected_indices)
+    assert set(indices) == set(expected_indices)
+
+    # Test deprecated select_cells
+    with pytest.warns(FutureWarning, match="select_cells is deprecated"):
+        res_list = grid.select_cells(
+            conditions={"elevation": lambda x: x > 0.5}, return_list=True
+        )
+    assert set(res_list) == set(indices)
+
+    with pytest.warns(FutureWarning, match="select_cells is deprecated"):
+        res_mask = grid.select_cells(
+            conditions={"elevation": lambda x: x > 0.5}, return_list=False
+        )
+    assert np.all(res_mask == mask)
